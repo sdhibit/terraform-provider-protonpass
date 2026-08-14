@@ -17,7 +17,8 @@ which are recommended, and how to authenticate in CI environments.
 |---|---|---|
 | **v1.5.2** | Minimum supported | Oldest version confirmed to work with this provider |
 | **v1.6.1 – v1.10.0** | Supported, untested | No breaking changes expected but not verified |
-| **v2.0.0 – v2.2.3** | Supported, untested | First stable 2.x series; introduces PAT authentication |
+| **v2.0.0 – v2.0.2** | Supported, untested | First stable 2.x series; introduces PAT authentication |
+| **v2.0.3 – v2.2.3** | Supported, untested | `item list` output changed here — see below |
 | **v2.2.4 – v2.3.2** | Recommended | `pass-cli test` removed here — see below |
 | **v2.3.2** | Tested locally | Verified against a live session, including item create round-trips |
 
@@ -25,8 +26,8 @@ which are recommended, and how to authenticate in CI environments.
 > provider. **Supported, untested** means the provider handles that
 > version's behaviour but no live session was run against it.
 
-Provider **v1.3.0 and later** are required for `pass-cli` v2.2.4 and later.
-Earlier provider releases break on those CLIs; see the section below.
+Provider **v1.3.0 and later** are required for `pass-cli` v2.0.3 and later.
+Earlier provider releases break on those CLIs; see the two sections below.
 
 ### Breaking change: `pass-cli test` removed in v2.2.4
 
@@ -46,6 +47,40 @@ for PAT and agent sessions), exits non-zero when no session is active, and
 predates every CLI version this provider supports. If the installed CLI is
 old enough not to recognise `info`, the provider falls back to `test`
 automatically, so no configuration change is needed either way.
+
+### Breaking change: `item list` output changed in v2.0.3
+
+As of CLI v2.0.3, `pass-cli item list --output=json` no longer includes the
+`content` object. This is deliberate: listing must never return secret
+material. Item titles and types moved to the top level of each entry:
+
+```json
+{
+  "items": [
+    {
+      "id": "…", "share_id": "…", "vault_id": "…",
+      "state": "Active", "flags": [],
+      "create_time": "…", "modify_time": "…",
+      "title": "Database Credentials",
+      "item_type": "login"
+    }
+  ]
+}
+```
+
+Provider versions before v1.3.0 only understood the older nested shape, so on
+CLI v2.0.3+ every listed item parsed with an empty title and was misreported
+as a note. That broke item creation (the new item could not be found on
+readback, failing the apply while leaving the item in the vault), the
+`protonpass_items` data source, and trashed-item detection.
+
+The provider now accepts both shapes, so no configuration change is needed.
+
+Note that `item list` returns metadata only on v2.0.3+. The
+`protonpass_items` data source exposes exactly that metadata (`item_id`,
+`share_id`, `title`, `type`, `create_time`, `modify_time`). To read secret
+values, use the `protonpass_item` data source, which fetches the full item
+with `pass-cli item view`.
 
 To check your installed version:
 
