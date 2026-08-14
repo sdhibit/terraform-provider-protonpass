@@ -121,3 +121,62 @@ func TestFlattenItem_UnknownSummaryTypeFallsBackToNote(t *testing.T) {
 		t.Errorf("Type = %q, want %q", item.Type, "note")
 	}
 }
+
+// Every `item create` subcommand prints the new item's ID. Reading it back by
+// that ID is exact; the title lookup it replaced could not tell duplicate
+// titles apart and broke outright once `item list` stopped returning titles.
+func TestCreateItemLogin_ReadsBackByReturnedID(t *testing.T) {
+	viewFixture := loadFixture(t, "item_login_read.json")
+	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
+		"item create": {Stdout: []byte("item-login-001\n")},
+		"item view":   {Stdout: viewFixture},
+	})
+	client := passcli.NewClient(runner)
+
+	item, err := client.CreateItemLogin(t.Context(), "share-abc-123", "Database Credentials", "alice", "pw", "", nil)
+	if err != nil {
+		t.Fatalf("CreateItemLogin returned error: %v", err)
+	}
+	if item == nil {
+		t.Fatal("expected an item")
+	}
+
+	// No `item list` fallback should have been needed.
+	for _, call := range runner.Calls {
+		if len(call.Args) >= 2 && call.Args[0] == "item" && call.Args[1] == "list" {
+			t.Errorf("unexpected fallback to `item list`: %v", call.Args)
+		}
+	}
+
+	var viewed bool
+	for _, call := range runner.Calls {
+		if len(call.Args) >= 2 && call.Args[0] == "item" && call.Args[1] == "view" {
+			viewed = true
+			if call.Args[len(call.Args)-1] != "pass://share-abc-123/item-login-001" {
+				t.Errorf("read back wrong URI: %v", call.Args)
+			}
+		}
+	}
+	if !viewed {
+		t.Error("expected the created item to be read back with `item view`")
+	}
+}
+
+// A CLI that prints something other than a bare ID must not have that output
+// mistaken for one; the title lookup remains the safety net.
+func TestCreateItemLogin_FallsBackToTitleLookup(t *testing.T) {
+	listFixture := loadFixture(t, "item_list_multi.json")
+	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
+		"item create": {Stdout: []byte("Created login item successfully\n")},
+		"item list":   {Stdout: listFixture},
+	})
+	client := passcli.NewClient(runner)
+
+	item, err := client.CreateItemLogin(t.Context(), "share-abc-123", "Database Credentials", "alice", "pw", "", nil)
+	if err != nil {
+		t.Fatalf("CreateItemLogin returned error: %v", err)
+	}
+	if item.ItemID != "item-login-001" {
+		t.Errorf("ItemID = %q, want %q", item.ItemID, "item-login-001")
+	}
+}

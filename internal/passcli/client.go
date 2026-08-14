@@ -346,6 +346,32 @@ func (c *Client) GetItem(ctx context.Context, itemID, title, shareID string) (*I
 	return &resp.Item, nil
 }
 
+// parseCreatedItemID extracts the item ID that `item create <type>` prints on
+// stdout. Every create subcommand prints the bare ID and nothing else, so a
+// value containing whitespace is some other message and is rejected rather
+// than passed on as an ID.
+func parseCreatedItemID(stdout []byte) string {
+	id := strings.TrimSpace(string(stdout))
+	if id == "" || strings.ContainsAny(id, " \t\r\n") {
+		return ""
+	}
+	return id
+}
+
+// resolveCreatedItem reads back an item that was just created. It prefers the
+// ID echoed by `item create`, which is exact; looking the item up by title is
+// only a fallback for CLIs that print nothing, and is ambiguous when a vault
+// holds several items with the same title.
+func (c *Client) resolveCreatedItem(ctx context.Context, shareID, title string, stdout []byte) (*ItemJSON, error) {
+	if itemID := parseCreatedItemID(stdout); itemID != "" {
+		return c.ReadItem(ctx, itemID, shareID)
+	}
+	tflog.Debug(ctx, "item create printed no item ID; falling back to title lookup", map[string]interface{}{
+		"share_id": shareID,
+	})
+	return c.findItemByTitle(ctx, shareID, title)
+}
+
 // findItemByTitle finds a newly created item in the vault by title.
 func (c *Client) findItemByTitle(ctx context.Context, shareID, title string) (*ItemJSON, error) {
 	items, err := c.ListItemsInVault(ctx, shareID)
@@ -394,11 +420,11 @@ func (c *Client) CreateItemLogin(ctx context.Context, shareID, title, username, 
 	for _, u := range urls {
 		args = append(args, "--url="+u)
 	}
-	_, _, err := c.runner.Run(ctx, args...)
+	stdout, _, err := c.runner.Run(ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create login item: %w", err)
 	}
-	return c.findItemByTitle(ctx, shareID, title)
+	return c.resolveCreatedItem(ctx, shareID, title, stdout)
 }
 
 // ReadItem reads an item by ID and share ID. Works for all item types.
@@ -471,11 +497,7 @@ func (c *Client) CreateItemNote(ctx context.Context, shareID, title, note string
 	if err != nil {
 		return nil, fmt.Errorf("failed to create note item: %w", err)
 	}
-	itemID := strings.TrimSpace(string(stdout))
-	if itemID == "" {
-		return nil, fmt.Errorf("failed to get item ID after create note")
-	}
-	return c.ReadItem(ctx, itemID, shareID)
+	return c.resolveCreatedItem(ctx, shareID, title, stdout)
 }
 
 // --- Item Credit Card operations ---
@@ -501,11 +523,11 @@ func (c *Client) CreateItemCreditCard(ctx context.Context, shareID, title, cardh
 	if pin != "" {
 		args = append(args, "--pin="+pin)
 	}
-	_, _, err := c.runner.Run(ctx, args...)
+	stdout, _, err := c.runner.Run(ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create credit card item: %w", err)
 	}
-	return c.findItemByTitle(ctx, shareID, title)
+	return c.resolveCreatedItem(ctx, shareID, title, stdout)
 }
 
 // --- Item WiFi operations ---
@@ -525,11 +547,11 @@ func (c *Client) CreateItemWiFi(ctx context.Context, shareID, title, ssid, passw
 	if security != "" {
 		args = append(args, "--security="+security)
 	}
-	_, _, err := c.runner.Run(ctx, args...)
+	stdout, _, err := c.runner.Run(ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create WiFi item: %w", err)
 	}
-	return c.findItemByTitle(ctx, shareID, title)
+	return c.resolveCreatedItem(ctx, shareID, title, stdout)
 }
 
 // --- Item Identity operations ---
@@ -556,12 +578,7 @@ func (c *Client) CreateItemIdentity(ctx context.Context, shareID string, templat
 		return nil, fmt.Errorf("failed to create identity item: %w", err)
 	}
 
-	itemID := strings.TrimSpace(string(stdout))
-	if itemID == "" {
-		return nil, fmt.Errorf("failed to parse identity creation response: empty output")
-	}
-
-	return c.ReadItem(ctx, itemID, shareID)
+	return c.resolveCreatedItem(ctx, shareID, tmpl["title"], stdout)
 }
 
 // --- Item SSH Key operations ---
@@ -578,16 +595,16 @@ func (c *Client) CreateItemSSHKey(ctx context.Context, shareID, title, keyType, 
 	if comment != "" {
 		args = append(args, "--comment="+comment)
 	}
-	_, _, err := c.runner.Run(ctx, args...)
+	stdout, _, err := c.runner.Run(ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate SSH key item: %w", err)
 	}
-	return c.findItemByTitle(ctx, shareID, title)
+	return c.resolveCreatedItem(ctx, shareID, title, stdout)
 }
 
 // CreateItemSSHKeyImport imports an SSH key from a private key file.
 func (c *Client) CreateItemSSHKeyImport(ctx context.Context, shareID, title, privateKeyPath string) (*ItemJSON, error) {
-	_, _, err := c.runner.Run(ctx, "item", "create", "ssh-key", "import",
+	stdout, _, err := c.runner.Run(ctx, "item", "create", "ssh-key", "import",
 		"--share-id="+shareID,
 		"--title="+title,
 		"--from-private-key="+privateKeyPath,
@@ -595,5 +612,5 @@ func (c *Client) CreateItemSSHKeyImport(ctx context.Context, shareID, title, pri
 	if err != nil {
 		return nil, fmt.Errorf("failed to import SSH key item: %w", err)
 	}
-	return c.findItemByTitle(ctx, shareID, title)
+	return c.resolveCreatedItem(ctx, shareID, title, stdout)
 }
