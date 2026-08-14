@@ -25,9 +25,29 @@ func NewClient(runner Runner) *Client {
 
 // HealthCheck verifies that pass-cli is available and a session is active.
 // Success is determined solely by exit code; stdout content is not checked.
+//
+// The probe is `pass-cli info`, which performs an authenticated round trip
+// (user info for password sessions, token name for PAT and agent sessions) and
+// therefore fails when no session is active. It predates every CLI release this
+// provider supports. Earlier versions of this provider probed with `pass-cli
+// test`, which was removed in pass-cli 2.2.4; it is now only tried as a
+// fallback for CLIs old enough not to recognise `info`.
 func (c *Client) HealthCheck(ctx context.Context) error {
-	_, _, err := c.runner.Run(ctx, "test")
-	return err
+	_, _, err := c.runner.Run(ctx, "info")
+	if err == nil {
+		return nil
+	}
+	if !IsUnsupportedCommand(err) {
+		return err
+	}
+
+	tflog.Warn(ctx, "pass-cli does not support `info`; falling back to the legacy `test` command", map[string]interface{}{
+		"error": err.Error(),
+	})
+	if _, _, legacyErr := c.runner.Run(ctx, "test"); legacyErr != nil {
+		return legacyErr
+	}
+	return nil
 }
 
 // --- Vault operations ---

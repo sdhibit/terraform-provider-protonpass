@@ -15,26 +15,37 @@ which are recommended, and how to authenticate in CI environments.
 
 | Version | Status | Notes |
 |---|---|---|
-| **v1.5.2** | Tested locally | Minimum version confirmed to work with this provider |
-| **v1.6.1 – v1.10.0** | Untested | Later 1.x releases; no breaking changes expected but not verified |
-| **v2.0.0 – v2.0.3** | Recommended | First stable 2.x series; introduces PAT authentication |
-| **v2.1.0** | Latest upstream | Most recent tagged release at time of writing |
+| **v1.5.2** | Minimum supported | Oldest version confirmed to work with this provider |
+| **v1.6.1 – v1.10.0** | Supported, untested | No breaking changes expected but not verified |
+| **v2.0.0 – v2.2.3** | Supported, untested | First stable 2.x series; introduces PAT authentication |
+| **v2.2.4 – v2.3.2** | Recommended | `pass-cli test` removed here — see below |
+| **v2.3.2** | Tested locally | Verified against a live session, including item create round-trips |
 
 > **Tested** means a real `pass-cli` session was used to exercise the
-> provider during development. **Untested** means the version is tagged
-> upstream but has not been verified against this provider.
+> provider. **Supported, untested** means the provider handles that
+> version's behaviour but no live session was run against it.
 
-### Minimum Tested Version: v1.5.2
+Provider **v1.3.0 and later** are required for `pass-cli` v2.2.4 and later.
+Earlier provider releases break on those CLIs; see the section below.
 
-The provider was developed and verified against `pass-cli` v1.5.2. All
-core operations (vault create/read/delete, item create/read/update/delete)
-were confirmed working against this version.
+### Breaking change: `pass-cli test` removed in v2.2.4
 
-### Recommended Version: v2.0.3+
+`pass-cli test` was removed in CLI v2.2.4. Provider versions before v1.3.0
+used it as their session health check, so on v2.2.4+ every Terraform
+operation failed at provider configuration time with:
 
-The 2.x line adds Personal Access Token (PAT) support, which is the
-recommended authentication method for CI/CD pipelines. Use v2.0.3 or
-later for new installations.
+```
+Proton Pass CLI Not Ready
+Could not verify pass-cli session.
+… error: unrecognized subcommand 'test'
+```
+
+The provider now probes with `pass-cli info` instead. `info` performs the
+same authenticated round trip (user info for password sessions, token name
+for PAT and agent sessions), exits non-zero when no session is active, and
+predates every CLI version this provider supports. If the installed CLI is
+old enough not to recognise `info`, the provider falls back to `test`
+automatically, so no configuration change is needed either way.
 
 To check your installed version:
 
@@ -42,24 +53,18 @@ To check your installed version:
 pass-cli --version
 ```
 
-To install or upgrade:
-
-```shell
-pip install --upgrade pass-cli
-```
-
 ## Verifying Your Session
 
-The provider calls `pass-cli test` as a health check at the start of each
+The provider calls `pass-cli info` as a health check at the start of each
 Terraform operation. It considers the session valid if the command exits
-with code 0.
+with code 0; stdout is not inspected.
 
 ```shell
-pass-cli test
+pass-cli info
 ```
 
-A successful response exits 0 regardless of the exact stdout message.
-A non-zero exit code indicates the session is not active.
+A successful response exits 0 and prints the account or token the session
+belongs to. A non-zero exit code indicates the session is not active.
 
 ## Authentication in CI/CD
 
@@ -69,34 +74,43 @@ For local development and simple CI setups, authenticate once with:
 
 ```shell
 pass-cli login
-pass-cli test
+pass-cli info
 ```
 
 The session is stored locally and reused by subsequent `pass-cli` calls.
 
-### Personal Access Token (v2.x only)
+### Personal Access Token (v1.10.0+)
 
 For CI/CD pipelines, use a Personal Access Token (PAT) to avoid
 interactive login. PATs grant scoped access to specific vaults and items.
 
-Generate a token in your Proton Pass account settings, then either pass
-it as a flag:
+Generate a token in your Proton Pass account settings, then either pass it
+to `login` as a flag:
 
 ```shell
-pass-cli login --personal-access-token "$PROTON_PASS_PERSONAL_ACCESS_TOKEN"
+pass-cli login --pat "$PROTON_PASS_PERSONAL_ACCESS_TOKEN"
 ```
 
-Or set the environment variable and let `pass-cli` pick it up
-automatically at login:
+Or set the environment variable and let `pass-cli` pick it up when the flag
+is omitted:
 
 ```shell
 export PROTON_PASS_PERSONAL_ACCESS_TOKEN="<your-token>"
 pass-cli login
-pass-cli test
+pass-cli info
 ```
+
+The token has the format `pst_<token>::<key>`.
 
 > Do not hardcode the token value. Inject it via your CI secret store
 > (GitHub Actions secrets, HashiCorp Vault, AWS Secrets Manager, etc.).
+
+### Session locks
+
+`pass-cli` v2.2.0+ can lock a session (`pass-cli session create-lock`). A
+locked session fails the provider health check. Unlock it with `pass-cli
+session unlock` before running Terraform, or leave CI sessions unlocked.
+PAT sessions cannot enable a session lock as of v2.2.6.
 
 ## Environment Variables Reference
 
@@ -105,9 +119,13 @@ authentication. They apply to the `pass-cli login` command.
 
 | Variable | Purpose | Version |
 |---|---|---|
-| `PROTON_PASS_PERSONAL_ACCESS_TOKEN` | Token for PAT-based login | v2.x+ |
+| `PROTON_PASS_PERSONAL_ACCESS_TOKEN` | Token for PAT-based login | v1.10.0+ |
+| `PROTON_PASS_USERNAME` | Account username for interactive login | v1.x+ |
+| `PROTON_PASS_USERNAME_FILE` | Path to a file containing the username | v1.x+ |
 | `PROTON_PASS_PASSWORD` | Account password for interactive login | v1.x+ |
 | `PROTON_PASS_PASSWORD_FILE` | Path to a file containing the password | v1.x+ |
+| `PROTON_PASS_SECOND_PASSWORD` | Proton second password | v2.3.0+ |
+| `PROTON_PASS_SECOND_PASSWORD_FILE` | Path to a file containing the second password | v2.3.0+ |
 | `PROTON_PASS_TOTP` | TOTP code for two-factor authentication | v1.x+ |
 | `PROTON_PASS_TOTP_FILE` | Path to a file containing the TOTP code | v1.x+ |
 | `PROTON_PASS_EXTRA_PASSWORD` | Pass-specific extra password | v1.x+ |
@@ -118,19 +136,19 @@ authentication. They apply to the `pass-cli login` command.
 > Always inject them from a secret store at runtime.
 
 The `protonpass` Terraform provider itself reads none of these variables
-directly. They are consumed by `pass-cli` during session setup, before
-Terraform runs.
+directly, apart from `PROTON_PASS_AGENT_REASON` (see the `agent_reason`
+provider attribute). The rest are consumed by `pass-cli` during session
+setup, before Terraform runs.
 
 ## Example: GitHub Actions
 
 ```yaml
 - name: Set up pass-cli session
   run: |
-    pip install pass-cli
-    pass-cli login
-    pass-cli test
+    pass-cli login --pat "$PROTON_PASS_PAT"
+    pass-cli info
   env:
-    PROTON_PASS_PERSONAL_ACCESS_TOKEN: ${{ secrets.PROTON_PASS_PAT }}
+    PROTON_PASS_PAT: ${{ secrets.PROTON_PASS_PAT }}
 
 - name: Terraform apply
   run: terraform apply -auto-approve
@@ -139,4 +157,5 @@ Terraform runs.
 ## Upstream Resources
 
 - [pass-cli releases](https://github.com/protonpass/pass-cli/tags)
+- [pass-cli changelog](https://github.com/protonpass/pass-cli/blob/main/CHANGELOG.md)
 - [pass-cli documentation](https://protonpass.github.io/pass-cli/)

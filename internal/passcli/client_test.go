@@ -93,7 +93,7 @@ func TestReadVault_NotFound(t *testing.T) {
 
 func TestHealthCheck_Success(t *testing.T) {
 	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
-		"test": {Stdout: []byte("Connection successful\n")},
+		"info": {Stdout: []byte("- Release track: stable\n- Username: alice\n")},
 	})
 	client := passcli.NewClient(runner)
 	if err := client.HealthCheck(t.Context()); err != nil {
@@ -103,7 +103,7 @@ func TestHealthCheck_Success(t *testing.T) {
 
 func TestHealthCheck_SuccessEmptyStdout(t *testing.T) {
 	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
-		"test": {Stdout: []byte("")},
+		"info": {Stdout: []byte("")},
 	})
 	client := passcli.NewClient(runner)
 	if err := client.HealthCheck(t.Context()); err != nil {
@@ -113,7 +113,7 @@ func TestHealthCheck_SuccessEmptyStdout(t *testing.T) {
 
 func TestHealthCheck_SuccessDifferentStdout(t *testing.T) {
 	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
-		"test": {Stdout: []byte("OK\n")},
+		"info": {Stdout: []byte("OK\n")},
 	})
 	client := passcli.NewClient(runner)
 	if err := client.HealthCheck(t.Context()); err != nil {
@@ -123,7 +123,7 @@ func TestHealthCheck_SuccessDifferentStdout(t *testing.T) {
 
 func TestHealthCheck_AuthError(t *testing.T) {
 	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
-		"test": {Err: &passcli.CLIError{ExitCode: 1, Stderr: "unauthorized"}},
+		"info": {Err: &passcli.CLIError{ExitCode: 1, Stderr: "unauthorized"}},
 	})
 	client := passcli.NewClient(runner)
 	err := client.HealthCheck(t.Context())
@@ -132,6 +132,58 @@ func TestHealthCheck_AuthError(t *testing.T) {
 	}
 	if !passcli.IsAuthError(err) {
 		t.Errorf("expected AuthError, got: %v", err)
+	}
+}
+
+// HealthCheck must not probe `test` when `info` already answered: `test` no
+// longer exists on pass-cli >= 2.2.4.
+func TestHealthCheck_UsesInfoAndDoesNotCallTest(t *testing.T) {
+	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
+		"info": {Stdout: []byte("- Username: alice\n")},
+	})
+	client := passcli.NewClient(runner)
+	if err := client.HealthCheck(t.Context()); err != nil {
+		t.Fatalf("HealthCheck failed: %v", err)
+	}
+	if len(runner.Calls) != 1 {
+		t.Fatalf("expected exactly 1 CLI call, got %d: %v", len(runner.Calls), runner.Calls)
+	}
+	if runner.Calls[0].Args[0] != "info" {
+		t.Errorf("expected `info` probe, got %v", runner.Calls[0].Args)
+	}
+}
+
+// A CLI too old to know `info` must still be usable via the legacy `test`
+// command rather than failing provider configuration outright.
+func TestHealthCheck_FallsBackToTestOnUnsupportedInfo(t *testing.T) {
+	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
+		"info": {Err: &passcli.CLIError{ExitCode: 2, Stderr: "error: unrecognized subcommand 'info'"}},
+		"test": {Stdout: []byte("Connection successful\n")},
+	})
+	client := passcli.NewClient(runner)
+	if err := client.HealthCheck(t.Context()); err != nil {
+		t.Fatalf("HealthCheck should have fallen back to `test`: %v", err)
+	}
+	if len(runner.Calls) != 2 {
+		t.Fatalf("expected info then test, got %d calls: %v", len(runner.Calls), runner.Calls)
+	}
+	if runner.Calls[1].Args[0] != "test" {
+		t.Errorf("expected fallback to `test`, got %v", runner.Calls[1].Args)
+	}
+}
+
+// An auth failure must surface as-is; retrying `test` would mask it behind a
+// confusing "unrecognized subcommand" error on modern CLIs.
+func TestHealthCheck_AuthErrorDoesNotFallBack(t *testing.T) {
+	runner := testutil.NewFakeRunner(map[string]testutil.FakeResponse{
+		"info": {Err: &passcli.CLIError{ExitCode: 1, Stderr: "session expired"}},
+	})
+	client := passcli.NewClient(runner)
+	if err := client.HealthCheck(t.Context()); err == nil {
+		t.Fatal("expected error for expired session")
+	}
+	if len(runner.Calls) != 1 {
+		t.Fatalf("expected no fallback, got %d calls: %v", len(runner.Calls), runner.Calls)
 	}
 }
 
