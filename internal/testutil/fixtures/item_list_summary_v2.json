@@ -1,0 +1,81 @@
+{
+    "items": [
+        {
+            "id": "item-login-001",
+            "share_id": "share-abc-123",
+            "vault_id": "vault-abc-123",
+            "state": "Active",
+            "flags": [],
+            "create_time": "2025-03-01T09:00:00Z",
+            "modify_time": "2025-03-01T09:00:00Z",
+            "title": "Database Credentials",
+            "item_type": "login"
+        },
+        {
+            "id": "item-note-001",
+            "share_id": "share-abc-123",
+            "vault_id": "vault-abc-123",
+            "state": "Active",
+            "flags": [],
+            "create_time": "2025-03-01T10:00:00Z",
+            "modify_time": "2025-03-01T10:00:00Z",
+            "title": "My Note",
+            "item_type": "note"
+        },
+        {
+            "id": "item-cc-002",
+            "share_id": "share-abc-123",
+            "vault_id": "vault-abc-123",
+            "state": "Active",
+            "flags": [],
+            "create_time": "2025-03-01T11:00:00Z",
+            "modify_time": "2025-03-01T11:00:00Z",
+            "title": "My Visa",
+            "item_type": "credit_card"
+        },
+        {
+            "id": "item-wifi-003",
+            "share_id": "share-abc-123",
+            "vault_id": "vault-abc-123",
+            "state": "Active",
+            "flags": [],
+            "create_time": "2025-03-01T12:00:00Z",
+            "modify_time": "2025-03-01T12:00:00Z",
+            "title": "Office WiFi",
+            "item_type": "wifi"
+        },
+        {
+            "id": "item-ssh-004",
+            "share_id": "share-abc-123",
+            "vault_id": "vault-abc-123",
+            "state": "Active",
+            "flags": [],
+            "create_time": "2025-03-01T13:00:00Z",
+            "modify_time": "2025-03-01T13:00:00Z",
+            "title": "Deploy Key",
+            "item_type": "ssh_key"
+        },
+        {
+            "id": "item-id-005",
+            "share_id": "share-abc-123",
+            "vault_id": "vault-abc-123",
+            "state": "Active",
+            "flags": [],
+            "create_time": "2025-03-01T14:00:00Z",
+            "modify_time": "2025-03-01T14:00:00Z",
+            "title": "My Identity",
+            "item_type": "identity"
+        },
+        {
+            "id": "item-alias-006",
+            "share_id": "share-abc-123",
+            "vault_id": "vault-abc-123",
+            "state": "Active",
+            "flags": [],
+            "create_time": "2025-03-01T15:00:00Z",
+            "modify_time": "2025-03-01T15:00:00Z",
+            "title": "Newsletter Alias",
+            "item_type": "alias"
+        }
+    ]
+}

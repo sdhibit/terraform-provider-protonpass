@@ -32,7 +32,17 @@ type ItemTOTPJSON struct {
 }
 
 // ItemRawJSON represents a raw item as returned by pass-cli item list/view --output json.
-// The structure is deeply nested: content.content.Login holds the login-specific fields.
+//
+// Two wire shapes exist and both are accepted:
+//
+//   - Full shape: content is nested, so content.content.Login holds the
+//     login-specific fields. Emitted by `item view` on every version, by
+//     `item list --show-secrets` on pass-cli >= 2.0.3, and by plain
+//     `item list` on pass-cli < 2.0.3.
+//   - Summary shape: pass-cli >= 2.0.3 deliberately omits `content` from plain
+//     `item list` so that listing can never leak secret material, and instead
+//     promotes `title` and `item_type` to the top level. SummaryTitle and
+//     SummaryItemType capture those, and FlattenItem falls back to them.
 type ItemRawJSON struct {
 	ID         string          `json:"id"`
 	ShareID    string          `json:"share_id"`
@@ -41,6 +51,10 @@ type ItemRawJSON struct {
 	State      string          `json:"state"`
 	CreateTime string          `json:"create_time"`
 	ModifyTime string          `json:"modify_time"`
+
+	// Summary shape only; empty when the full shape is returned.
+	SummaryTitle    string `json:"title"`
+	SummaryItemType string `json:"item_type"`
 }
 
 // ItemContentJSON wraps the top-level content (title, note) and inner typed content.
@@ -204,6 +218,24 @@ type ItemJSON struct {
 	WorkEmail       string
 }
 
+// itemTypeFromSummary maps the item_type value emitted by `item list` on
+// pass-cli >= 2.0.3 onto the type strings this provider uses. pass-cli
+// serialises the variants in snake_case; the provider spells the two
+// multi-word types with hyphens to match the `item create` subcommand names.
+// An unrecognised or empty value returns "" so callers can fall back.
+func itemTypeFromSummary(itemType string) string {
+	switch itemType {
+	case "credit_card":
+		return "credit-card"
+	case "ssh_key":
+		return "ssh-key"
+	case "note", "login", "alias", "identity", "wifi", "custom":
+		return itemType
+	default:
+		return ""
+	}
+}
+
 // FlattenItem converts a raw CLI item into our flattened internal representation.
 func FlattenItem(raw ItemRawJSON) ItemJSON {
 	item := ItemJSON{
@@ -216,6 +248,11 @@ func FlattenItem(raw ItemRawJSON) ItemJSON {
 		State:      raw.State,
 	}
 
+	// Summary shape carries the title at the top level instead of under content.
+	if item.Title == "" {
+		item.Title = raw.SummaryTitle
+	}
+
 	if raw.Content.Content.Login != nil {
 		item.Type = "login"
 		item.Username = raw.Content.Content.Login.Username
@@ -224,8 +261,16 @@ func FlattenItem(raw ItemRawJSON) ItemJSON {
 		item.URLs = raw.Content.Content.Login.URLs
 		item.TOTPUri = raw.Content.Content.Login.TOTPUri
 	} else if raw.Content.Content.Login == nil && raw.Content.Content.CreditCard == nil && raw.Content.Content.Wifi == nil && raw.Content.Content.SshKey == nil && raw.Content.Content.Identity == nil {
-		item.Type = "note"
-		if item.Note == "" && raw.Content.Content.Note != nil && raw.Content.Content.Note.Note != "" {
+		// No typed content block. Either this really is a note, or it is a
+		// summary from `item list` on pass-cli >= 2.0.3, where item_type is the
+		// only type signal available. Trust item_type when it is present,
+		// otherwise fall back to the historical note assumption.
+		if t := itemTypeFromSummary(raw.SummaryItemType); t != "" {
+			item.Type = t
+		} else {
+			item.Type = "note"
+		}
+		if item.Type == "note" && item.Note == "" && raw.Content.Content.Note != nil && raw.Content.Content.Note.Note != "" {
 			item.Note = raw.Content.Content.Note.Note
 		}
 	} else if raw.Content.Content.CreditCard != nil {
